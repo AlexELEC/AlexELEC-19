@@ -1,0 +1,11 @@
+[Unit]
+Description=OpenSSH defaults
+After=local-fs.target
+
+ConditionPathExists=!/storage/.cache/services/sshd.conf
+ConditionPathExists=!/storage/.cache/services/sshd.disabled
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c 'cp /usr/share/services/sshd.conf /storage/.cache/services/'
+RemainAfterExit=yes

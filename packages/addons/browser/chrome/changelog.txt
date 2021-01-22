@@ -1,0 +1,15 @@
+104
+- updated to 87.0.4280
+
+103
+- fix getting default audio device
+
+102
+- add dark mode at options
+- support for latest Chrome
+
+101
+- fix download url
+
+100
+- initial release

@@ -1,0 +1,22 @@
+[Unit]
+Description=Textmode Shell
+
+[Service]
+Environment=TTY=3
+WorkingDirectory=/
+ExecStartPre=/bin/sh -c 'echo -en "\033[?25h"'
+ExecStart=/bin/sh -c 'clear; lsb_release; . /etc/profile; exec /bin/sh'
+
+Restart=always
+RestartSec=0
+StandardInput=tty
+TTYPath=/dev/tty3
+TTYReset=yes
+TTYVHangup=yes
+KillMode=process
+IgnoreSIGPIPE=no
+# bash ignores SIGTERM
+KillSignal=SIGHUP
+
+[Install]
+WantedBy=multi-user.target

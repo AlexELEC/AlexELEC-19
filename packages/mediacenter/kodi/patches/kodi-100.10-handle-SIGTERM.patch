@@ -1,0 +1,154 @@
+From a4632124ca32374fd1ab728f30be9aaa79186ba5 Mon Sep 17 00:00:00 2001
+From: MilhouseVH <milhouseVH.github@nmacleod.com>
+Date: Tue, 19 Mar 2019 18:06:56 +0000
+Subject: [PATCH] handle SIGTERM
+
+0. CApplication::Stop cant be trusted. (deadlocks crashes and boo)
+
+so, when shutdown/reboot is requested:
+
+1. save an exit code (for CEC...)
+2. call CPowerManager::{Reboot,PowerDown}
+3. ... then systemd sends TERM and waits xx seconds before sending KILL
+4. CApplication::Stop has xx seconds to save guisettings.xml and boo
+5. CEC thread has xx seconds to switch off after it received OnQuit
+6. addons / pvrmanager / cec / everything else.. are free to deadlock / crash now, we dont care
+7. KILL
+---
+ xbmc/Application.cpp                          | 23 ++++++++++++++-----
+ xbmc/Application.h                            |  1 +
+ xbmc/XBApplicationEx.cpp                      |  1 +
+ xbmc/XBApplicationEx.h                        |  1 +
+ .../powermanagement/LogindUPowerSyscall.cpp   |  2 --
+ 5 files changed, 20 insertions(+), 8 deletions(-)
+
+diff --git a/xbmc/Application.cpp b/xbmc/Application.cpp
+index 35de935a74..1754152782 100644
+--- a/xbmc/Application.cpp
++++ b/xbmc/Application.cpp
+@@ -2060,12 +2060,12 @@ void CApplication::OnApplicationMessage(ThreadMessage* pMsg)
+   switch (msg)
+   {
+   case TMSG_POWERDOWN:
+-    Stop(EXITCODE_POWERDOWN);
++    SetExitCode(EXITCODE_POWERDOWN);
+     CServiceBroker::GetPowerManager().Powerdown();
+     break;
+ 
+   case TMSG_QUIT:
+-    Stop(EXITCODE_QUIT);
++    SetExitCode(EXITCODE_QUIT);
+     break;
+ 
+   case TMSG_SHUTDOWN:
+@@ -2086,12 +2086,13 @@ void CApplication::OnApplicationMessage(ThreadMessage* pMsg)
+ 
+   case TMSG_RESTART:
+   case TMSG_RESET:
+-    Stop(EXITCODE_REBOOT);
++    SetExitCode(EXITCODE_REBOOT);
+     CServiceBroker::GetPowerManager().Reboot();
+     break;
+ 
+   case TMSG_RESTARTAPP:
+ #if defined(TARGET_WINDOWS) || defined(TARGET_LINUX)
++    SetExitCode(EXITCODE_RESTARTAPP);
+     Stop(EXITCODE_RESTARTAPP);
+ #endif
+     break;
+@@ -2570,6 +2571,17 @@ bool CApplication::Cleanup()
+   }
+ }
+ 
++void CApplication::SetExitCode(int exitCode)
++{
++  if (!m_ExitCodeSet)
++  {
++    CLog::Log(LOGINFO, "Saving exitCode %d", exitCode);
++    // save it for CEC
++    m_ExitCode = exitCode;
++    m_ExitCodeSet = true;
++  }
++}
++
+ void CApplication::Stop(int exitCode)
+ {
+   CLog::Log(LOGINFO, "Stopping player");
+@@ -2596,7 +2608,7 @@ void CApplication::Stop(int exitCode)
+     m_frameMoveGuard.unlock();
+ 
+     CVariant vExitCode(CVariant::VariantTypeObject);
+-    vExitCode["exitcode"] = exitCode;
++    vExitCode["exitcode"] = m_ExitCode;
+     CServiceBroker::GetAnnouncementManager()->Announce(ANNOUNCEMENT::System, "OnQuit", vExitCode);
+ 
+     // Abort any active screensaver
+@@ -2628,7 +2640,6 @@ void CApplication::Stop(int exitCode)
+     // Needs cleaning up
+     CApplicationMessenger::GetInstance().Stop();
+     m_AppFocused = false;
+-    m_ExitCode = exitCode;
+     CLog::Log(LOGINFO, "Stopping all");
+ 
+     // cancel any jobs from the jobmanager
+@@ -4210,7 +4221,7 @@ void CApplication::ProcessSlow()
+   if (CPlatformPosix::TestQuitFlag())
+   {
+     CLog::Log(LOGINFO, "Quitting due to POSIX signal");
+-    CApplicationMessenger::GetInstance().PostMsg(TMSG_QUIT);
++    CApplicationMessenger::GetInstance().PostMsg(TMSG_RESTARTAPP);
+   }
+ #endif
+ 
+diff --git a/xbmc/Application.h b/xbmc/Application.h
+index 050f11afc0..a25af7e93b 100644
+--- a/xbmc/Application.h
++++ b/xbmc/Application.h
+@@ -156,6 +156,7 @@ public:
+   bool StartServer(enum ESERVERS eServer, bool bStart, bool bWait = false);
+ 
+   bool IsCurrentThread() const;
++  void SetExitCode(int exitCode);
+   void Stop(int exitCode);
+   void UnloadSkin();
+   bool LoadCustomWindows();
+diff --git a/xbmc/XBApplicationEx.cpp b/xbmc/XBApplicationEx.cpp
+index 8982725b35..95070fbe9f 100644
+--- a/xbmc/XBApplicationEx.cpp
++++ b/xbmc/XBApplicationEx.cpp
+@@ -23,6 +23,7 @@ CXBApplicationEx::CXBApplicationEx()
+   m_bStop = false;
+   m_AppFocused = true;
+   m_ExitCode = EXITCODE_QUIT;
++  m_ExitCodeSet = false;
+   m_renderGUI = false;
+ }
+ 
+diff --git a/xbmc/XBApplicationEx.h b/xbmc/XBApplicationEx.h
+index e7534b8c05..8f45f04ec8 100644
+--- a/xbmc/XBApplicationEx.h
++++ b/xbmc/XBApplicationEx.h
+@@ -29,6 +29,7 @@ public:
+   // Variables for timing
+   bool m_bStop;
+   int  m_ExitCode;
++  bool m_ExitCodeSet;
+   bool m_AppFocused;
+   bool m_renderGUI;
+ 
+diff --git a/xbmc/platform/linux/powermanagement/LogindUPowerSyscall.cpp b/xbmc/platform/linux/powermanagement/LogindUPowerSyscall.cpp
+index 5e400772b1..6dc2cbbc4d 100644
+--- a/xbmc/platform/linux/powermanagement/LogindUPowerSyscall.cpp
++++ b/xbmc/platform/linux/powermanagement/LogindUPowerSyscall.cpp
+@@ -78,8 +78,6 @@ CLogindUPowerSyscall::~CLogindUPowerSyscall()
+ 
+ bool CLogindUPowerSyscall::Powerdown()
+ {
+-  // delay shutdown so that the app can close properly
+-  InhibitDelayLockShutdown();
+   return LogindSetPowerState("PowerOff");
+ }
+ 
+-- 
+2.25.1
+

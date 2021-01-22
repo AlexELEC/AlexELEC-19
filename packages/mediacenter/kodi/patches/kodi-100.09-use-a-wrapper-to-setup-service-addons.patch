@@ -1,0 +1,103 @@
+diff --git a/xbmc/addons/Addon.cpp b/xbmc/addons/Addon.cpp
+index 11d304662d..a685ac568a 100644
+--- a/xbmc/addons/Addon.cpp
++++ b/xbmc/addons/Addon.cpp
+@@ -375,6 +375,37 @@ AddonVersion CAddon::GetDependencyVersion(const std::string &dependencyID) const
+   return m_addonInfo->DependencyVersion(dependencyID);
+ }
+ 
++void LEAddonHook(const AddonPtr& addon, const LE_ADDON_CONTEXT context) {
++
++  if (addon->Type() == ADDON_SERVICE) {
++    std::string contextStr;
++    char cmd[255];
++
++    switch (context) {
++    case LE_ADDON_ENABLED:
++      contextStr = "enable";
++      break;
++    case LE_ADDON_DISABLED:
++      contextStr = "disable";
++      break;
++    case LE_ADDON_POST_UPDATE:
++      contextStr = "post-update";
++      break;
++    case LE_ADDON_PRE_UNINSTALL:
++      contextStr = "pre-uninstall";
++      break;
++    default:
++      contextStr = StringUtils::Format("unknown(%d)", context);
++      break;
++    }
++
++    snprintf(cmd, sizeof(cmd), "/usr/sbin/service-addon-wrapper %s %s %s",
++      contextStr.c_str(), addon->ID().c_str(), addon->Path().c_str());
++
++    system(cmd);
++  }
++}
++
+ void OnPreInstall(const AddonPtr& addon)
+ {
+   //Fallback to the pre-install callback in the addon.
+@@ -404,6 +435,9 @@ void OnPostInstall(const AddonPtr& addon, bool update, bool modal)
+     }
+     closedir(addonsDir);
+   }
++
++  if (update)
++    LEAddonHook(addon, LE_ADDON_POST_UPDATE);
+   // OE
+ 
+   addon->OnPostInstall(update, modal);
+@@ -411,6 +445,8 @@ void OnPostInstall(const AddonPtr& addon, bool update, bool modal)
+ 
+ void OnPreUnInstall(const AddonPtr& addon)
+ {
++  LEAddonHook(addon, LE_ADDON_PRE_UNINSTALL);
++
+   addon->OnPreUnInstall();
+ }
+ 
+diff --git a/xbmc/addons/Addon.h b/xbmc/addons/Addon.h
+index 9715387588..0f6b23de95 100644
+--- a/xbmc/addons/Addon.h
++++ b/xbmc/addons/Addon.h
+@@ -27,6 +27,15 @@ namespace ADDON
+   void OnPreUnInstall(const AddonPtr& addon);
+   void OnPostUnInstall(const AddonPtr& addon);
+ 
++typedef enum {
++  LE_ADDON_ENABLED,
++  LE_ADDON_DISABLED,
++  LE_ADDON_POST_UPDATE,
++  LE_ADDON_PRE_UNINSTALL,
++} LE_ADDON_CONTEXT;
++
++void LEAddonHook(const AddonPtr& addon, const LE_ADDON_CONTEXT context);
++
+ class CAddon : public IAddon
+ {
+ public:
+diff --git a/xbmc/addons/AddonManager.cpp b/xbmc/addons/AddonManager.cpp
+index 7606c6f95e..eb65d918cd 100644
+--- a/xbmc/addons/AddonManager.cpp
++++ b/xbmc/addons/AddonManager.cpp
+@@ -788,6 +788,7 @@ bool CAddonMgr::DisableAddon(const std::string& id, AddonDisabledReason disabled
+   AddonPtr addon;
+   if (GetAddon(id, addon, ADDON_UNKNOWN, false) && addon != NULL)
+   {
++    ADDON::LEAddonHook(addon, ADDON::LE_ADDON_DISABLED);
+     CServiceBroker::GetEventLog().Add(EventPtr(new CAddonManagementEvent(addon, 24141)));
+   }
+ 
+@@ -816,6 +817,7 @@ bool CAddonMgr::EnableSingle(const std::string& id)
+   if (!m_database.EnableAddon(id))
+     return false;
+   m_disabled.erase(id);
++  ADDON::LEAddonHook(addon, ADDON::LE_ADDON_ENABLED);
+ 
+   // If enabling a repo add-on without an origin, set its origin to its own id
+   if (addon->HasType(ADDON_REPOSITORY) && addon->Origin().empty())
+-- 
+2.25.1
