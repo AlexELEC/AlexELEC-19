@@ -6,7 +6,7 @@ PKG_VERSION=""
 PKG_LICENSE="GPL"
 PKG_SITE="http://www.openelec.tv"
 PKG_URL=""
-PKG_DEPENDS_TARGET="toolchain gdb edid-decode memtester"
+PKG_DEPENDS_TARGET="toolchain gdb edid-decode memtester strace"
 PKG_SECTION="virtual"
 PKG_LONGDESC="debug is a Metapackage for installing debugging tools"
 
@@ -21,7 +21,7 @@ if [ "${VAAPI_SUPPORT}" = "yes" ]; then
   PKG_DEPENDS_TARGET+=" libva-utils"
 fi
 
-if build_with_debug && [ "${VALGRIND}" = "yes" ]; then
+if [ "${VALGRIND}" = "yes" ]; then
   PKG_DEPENDS_TARGET+=" valgrind"
 fi
 

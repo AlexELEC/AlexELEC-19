@@ -134,7 +134,7 @@ echo "${TARGET_VERSION}" > ${INSTALL}/etc/release
 cat <<EOF >${INSTALL}/etc/os-release
 NAME="${DISTRONAME}"
 VERSION="${LIBREELEC_VERSION}"
-ID="alexelec"
+ID="${DISTRONAME,,}"
 VERSION_ID="${OS_VERSION}"
 PRETTY_NAME="${DISTRONAME} (${LIBREELEC_BUILD}): ${LIBREELEC_VERSION}"
 HOME_URL="https://alexelec.tv"
